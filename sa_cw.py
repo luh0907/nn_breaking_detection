@@ -404,15 +404,23 @@ def run_kde(Data, Model, path):
     #print(sess.run(rmodel.predict(p)[1], {p: data.test_data[:10]}))
     #exit(0)
 
-    N = 10
-    print(model.model.predict(data.train_data[:N]))
-    print(hidden_layer.predict(data.train_data[:N]))
+    N = 9
+    #print(model.model.predict(data.train_data[:N]))
+    #print(hidden_layer.predict(data.train_data[:N]))
 
-    for i in range(10):
-        for j in range(N):
-            print(de[i].predict(data.train_data[j:j+1])) # N
+    adv_candid = []
+    adv_labels = np.zeros((9,10))
+    for i in range(1,10):
+        adv_candid.extend(data.test_data[np.argmax(data.test_labels,axis=1)==i][:1])
+        adv_labels[i-1][0] = 1
+    adv_candid = np.array(adv_candid)
+
+    #for i in range(10):
+    #    for j in range(N):
+    #        print(de[i].predict(data.train_data[j:j+1])) # N
     
-    start_density = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
+    #start_density = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
+    start_density = estimate_density_full(model, de, adv_candid)+1e-30
     print("starting density", np.log(start_density))
 
     DECONST = -np.log(start_density)
@@ -425,6 +433,8 @@ def run_kde(Data, Model, path):
         while r == np.argmax(data.test_labels[i]):
             r = np.random.random_integers(0,9)
         l[i,r] = 1
+
+    l = adv_labels
     print(l)
     attack1 = CarliniL2(sess, model, batch_size=1, max_iterations=3000,
                        binary_search_steps=3, initial_const=1.0, learning_rate=1e-1,
@@ -436,24 +446,34 @@ def run_kde(Data, Model, path):
     #l = np.zeros((N,10))
     #l[np.arange(N),1] = 1
     print("RUN PHASE 1")
-    adv = attack1.attack(data.test_data[M:M+N], l)
-    print('mean distortion',np.mean(np.sum((adv-data.test_data[M:M+N])**2,axis=(1,2,3))**.5))
+    #adv = attack1.attack(data.test_data[M:M+N], l)
+    adv = attack1.attack(adv_candid, l)
+    #print('mean distortion',np.mean(np.sum((adv-data.test_data[M:M+N])**2,axis=(1,2,3))**.5))
+    print('mean distortion', np.mean(np.sum((adv-adv_candid)**2, axis=(1,2,3))**.5))
 
     print("RUN PHASE 2")
-    adv = attack2.attack(data.test_data[M:M+N], adv, l)
+    #adv = attack2.attack(data.test_data[M:M+N], adv, l)
+    adv = attack2.attack(adv_candid, adv, l)
 
-    np.save("/tmp/q"+str(M),adv)
+    #np.save("/tmp/q"+str(M),adv)
+    np.save("/tmp/qcandid", adv)
     #adv = np.load("/tmp/qq.npy")
 
-    print('labels',np.mean(np.argmax(sess.run(model.predict(p), {p: adv}),axis=1)==l))
+    #print('labels',np.mean(np.argmax(sess.run(model.predict(p), {p: adv}),axis=1)==l))
+    print('labels')
+    print(np.argmax(l, axis=1))
+    print(np.argmax(sess.run(model.predict(p), {p: adv}), axis=1))
+    print(np.argmax(model.model.predict(adv), axis=1))
 
-    print('mean distortion',np.mean(np.sum((adv-data.test_data[M:M+N])**2,axis=(1,2,3))**.5))
+    #print('mean distortion',np.mean(np.sum((adv-data.test_data[M:M+N])**2,axis=(1,2,3))**.5))
+    print('mean distortion', np.mean(np.sum((adv-adv_candid)**2, axis=(1,2,3))**.5))
     
-    a = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
+    #a = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
+    a = estimate_density_full(model, de, adv_candid)+1e-30
     b = estimate_density_full(model, de, adv)+1e-30
 
-    print(data.test_data.shape)
-    print(adv.shape)
+    #print(data.test_data.shape)
+    #print(adv.shape)
 
     show(adv)
 
@@ -492,7 +512,7 @@ def run_kde(Data, Model, path):
 
 def show(img):
     for i in range(img.shape[0]):
-        imageio.imwrite("/tmp/adv_result_{}.jpg".format(i), img[i].reshape(28,28))
+        imageio.imwrite("/tmp/adv_result_{}_to_{}.jpg".format(i+1,0), img[i].reshape(28,28))
     remap = "  .*#"+"#"*100
     img = (img.flatten()+.5)*3
     print
