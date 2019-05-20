@@ -95,7 +95,7 @@ if __name__ == "__main__":
         layer_names = ["activation_3"]
 
         # Load target set.
-        x_target = np.load("./adv/adv_mnist_{}.npy".format(args.target))
+        #x_target = np.load("./adv/adv_mnist_{}.npy".format(args.target))
         
         #x_target = []
         #for i in range(1, 10):
@@ -103,7 +103,7 @@ if __name__ == "__main__":
         #    x_target.append(target_img)
         #x_target = np.array(x_target).reshape(-1, 28, 28, 1)
         
-        #x_target = np.load("/tmp/qcandid.npy")
+        x_target = np.load("/tmp/qcandid.npy")
         print(x_target.shape)
 
     elif args.d == "cifar":
@@ -136,8 +136,11 @@ if __name__ == "__main__":
 
     if args.lsa:
         test_lsa = fetch_lsa(model, x_train, x_test, "test", layer_names, args)
-
         target_lsa = fetch_lsa(model, x_train, x_target, args.target, layer_names, args)
+
+        print("Test mean LSA:", np.mean(test_lsa))
+        print("Adv. mean LSA:", np.mean(target_lsa))
+
         target_cov = get_sc(
             np.amin(target_lsa), args.upper_bound, args.n_bucket, target_lsa
         )
