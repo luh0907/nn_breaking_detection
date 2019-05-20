@@ -66,4 +66,4 @@ def train(data, Model, file_name, num_epochs=50, batch_size=128, init=None):
 
 if __name__ == "__main__":
     train(MNIST(), MNISTModel, "models/mnist", num_epochs=30)
-    train(CIFAR(), CIFARModel, "models/cifar", num_epochs=300)
+    #train(CIFAR(), CIFARModel, "models/cifar", num_epochs=300)
