@@ -35,6 +35,8 @@ TARGETED = True          # should we target one specific class? or just be wrong
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 1e-3     # the initial constant c to pick as a first guess
 
+TARGET_CLASS = 9
+
 class CarliniL2New:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
                  targeted = TARGETED, learning_rate = LEARNING_RATE,
@@ -409,10 +411,18 @@ def run_kde(Data, Model, path):
     #print(hidden_layer.predict(data.train_data[:N]))
 
     adv_candid = []
+    jumped = False
     adv_labels = np.zeros((9,10))
-    for i in range(1,10):
+    for i in range(0,10):
+        if i == TARGET_CLASS:
+            jumped = True
+            continue
         adv_candid.extend(data.test_data[np.argmax(data.test_labels,axis=1)==i][:1])
-        adv_labels[i-1][0] = 1
+        if jumped:
+            adv_labels[i-1][TARGET_CLASS] = 1
+        else:
+            adv_labels[i][TARGET_CLASS] = 1
+
     adv_candid = np.array(adv_candid)
 
     #for i in range(10):
@@ -456,7 +466,7 @@ def run_kde(Data, Model, path):
     adv = attack2.attack(adv_candid, adv, l)
 
     #np.save("/tmp/q"+str(M),adv)
-    np.save("/tmp/qcandid", adv)
+    np.save("./adv/adv_mnist_cnw_target_{}".format(TARGET_CLASS), adv)
     #adv = np.load("/tmp/qq.npy")
 
     #print('labels',np.mean(np.argmax(sess.run(model.predict(p), {p: adv}),axis=1)==l))
@@ -481,7 +491,7 @@ def run_kde(Data, Model, path):
     print('de of adv', np.mean(np.log(b)))
 
     print('better ratio', np.mean(np.array(a)>np.array(b)))
-    #exit(0)
+    exit(0)
 
     #density = gaussian_kde(np.array(np.log(a))-np.array(np.log(b)))
     #density_a = gaussian_kde(np.log(a))
@@ -511,8 +521,16 @@ def run_kde(Data, Model, path):
     #plt.show()
 
 def show(img):
-    for i in range(img.shape[0]):
-        imageio.imwrite("/tmp/adv_result_{}_to_{}.jpg".format(i+1,0), img[i].reshape(28,28))
+    jumped = False
+    for i in range(10):
+        if i == TARGET_CLASS:
+            jumped = True
+            continue
+        if jumped:
+            imageio.imwrite("./adv/adv_result_{}_to_{}.png".format(i,TARGET_CLASS), img[i-1].reshape(28,28))
+        else:
+            imageio.imwrite("./adv/adv_result_{}_to_{}.png".format(i,TARGET_CLASS), img[i].reshape(28,28))
+
     remap = "  .*#"+"#"*100
     img = (img.flatten()+.5)*3
     print

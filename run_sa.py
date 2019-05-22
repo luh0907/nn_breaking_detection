@@ -103,7 +103,10 @@ if __name__ == "__main__":
         #    x_target.append(target_img)
         #x_target = np.array(x_target).reshape(-1, 28, 28, 1)
         
-        x_target = np.load("/tmp/qcandid.npy")
+        x_target = []
+        for i in range(10):
+            x_target.extend(np.load("./adv/adv_mnist_cnw_target_{}.npy".format(i)))
+        x_target = np.array(x_target)
         print(x_target.shape)
 
     elif args.d == "cifar":
@@ -135,7 +138,7 @@ if __name__ == "__main__":
     print(np.argmax(model.predict(x_target), axis=1))
 
     if args.lsa:
-        test_lsa = fetch_lsa(model, x_train, x_test, "test", layer_names, args)
+        test_lsa = fetch_lsa(model, x_train, x_test[:90], "test", layer_names, args)
         target_lsa = fetch_lsa(model, x_train, x_target, args.target, layer_names, args)
 
         print("Test mean LSA:", np.mean(test_lsa))
