@@ -106,6 +106,7 @@ if __name__ == "__main__":
         x_target = []
         for i in range(10):
             x_target.extend(np.load("./adv/adv_mnist_cnw_target_{}.npy".format(i)))
+        #x_target.extend(np.load("./adv/adv_mnist_cnw_target_9.npy"))
         x_target = np.array(x_target)
         print(x_target.shape)
 
@@ -148,7 +149,7 @@ if __name__ == "__main__":
             np.amin(target_lsa), args.upper_bound, args.n_bucket, target_lsa
         )
 
-        auc = compute_roc_auc(test_lsa, target_lsa)
+        auc = compute_roc_auc(test_lsa, target_lsa, 9)
         print(infog("ROC-AUC: " + str(auc * 100)))
 
     if args.dsa:

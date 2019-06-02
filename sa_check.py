@@ -5,10 +5,11 @@ import os
 from multiprocessing import Pool
 from tqdm import tqdm
 from keras.models import load_model, Model
+from keras import backend as K
 from scipy.stats import gaussian_kde
 
 from utils_sa import *
-
+import tensorflow as tf
 
 def _aggr_output(x):
     return [np.mean(x[..., j]) for j in range(x.shape[-1])]
@@ -92,6 +93,7 @@ def get_ats(
             print("Layer: " + layer_name)
             if layer_output[0].ndim == 3:
                 # For convolutional layers
+                print(layer_output[0].shape)
                 layer_matrix = np.array(
                     p.map(_aggr_output, [layer_output[i] for i in range(len(dataset))])
                 )
@@ -229,6 +231,19 @@ def fetch_dsa(model, x_train, x_target, target_name, layer_names, args):
 
     return dsa
 
+class DensityEstimate:
+    def __init__(self, sess, refined_ats, image_size=28, num_channels=1, sigma=20):
+        self.sess = sess
+        self.num_images = refined_ats.shape[0]
+        self.refined_ats = tf.constant(refined_ats)
+        self.sigma = sigma
+        self.X = tf.placeholder(tf.float32, (refined_ats.shape[1]))
+        self.dist = tf.reduce_sum(tf.reshape(tf.square(self.refined_ats - self.X), (self.num_images, 1, -1)), axis=2)
+        self.Y = tf.reduce_mean(tf.exp(-self.dist/self.sigma), axis=0)
+
+    def predict(self, xs):
+        return self.sess.run(self.Y, {self.X: xs})
+
 
 def _get_kdes(train_ats, train_pred, class_matrix, args):
     """Kernel density estimation
@@ -243,6 +258,9 @@ def _get_kdes(train_ats, train_pred, class_matrix, args):
         kdes (list): List of kdes per label if classification task.
         removed_cols (list): List of removed columns by variance threshold.
     """
+
+    sess = K.get_session()
+    K.set_learning_phase(False)
 
     removed_cols = []
     if args.is_classification:
@@ -265,7 +283,10 @@ def _get_kdes(train_ats, train_pred, class_matrix, args):
                     warn("ats were removed by threshold {}".format(args.var_threshold))
                 )
                 break
-            kdes[label] = gaussian_kde(refined_ats)
+            #kdes[label] = gaussian_kde(refined_ats)
+            kdes[label] = DensityEstimate(sess, np.transpose(refined_ats), sigma=0.864)
+            print(refined_ats.shape)
+            #print(kdes[label].factor)
 
     else:
         col_vectors = np.transpose(train_ats)
@@ -286,7 +307,11 @@ def _get_kdes(train_ats, train_pred, class_matrix, args):
 
 def _get_lsa(kde, at, removed_cols):
     refined_at = np.delete(at, removed_cols, axis=0)
-    return np.asscalar(-kde.logpdf(np.transpose(refined_at)))
+    #print(refined_at)
+    #print(-kde.logpdf(np.transpose(refined_at)))
+    #print(kde.pdf(np.transpose(refined_at)))
+    #return np.asscalar(-kde.logpdf(np.transpose(refined_at)))
+    return np.asscalar(-np.log(kde.predict(refined_at)))
 
 
 def fetch_lsa(model, x_train, x_target, target_name, layer_names, args):

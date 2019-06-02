@@ -35,14 +35,14 @@ TARGETED = True          # should we target one specific class? or just be wrong
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 1e-3     # the initial constant c to pick as a first guess
 
-TARGET_CLASS = 9
+TARGET_CLASS = 2 
 
 class CarliniL2New:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
                  targeted = TARGETED, learning_rate = LEARNING_RATE,
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
                  abort_early = ABORT_EARLY, 
-                 initial_const = INITIAL_CONST, extra_loss=None):
+                 initial_const = INITIAL_CONST, extra_loss=None, debug_extra_loss=None, de=None):
         """
         The L_2 optimized attack. 
 
@@ -128,6 +128,9 @@ class CarliniL2New:
         else:
             self.extra_loss = 0
         self.loss = self.loss1+self.loss2+self.const*tf.reduce_sum(self.extra_loss)
+
+        self.debug_extra_loss = debug_extra_loss(self.newimg)
+        self.de = de
         
         # Setup the adam optimizer and keep track of variables we're creating
         start_vars = set(x.name for x in tf.global_variables())
@@ -225,6 +228,8 @@ class CarliniL2New:
                 # print out the losses every 10%
                 if iteration%(self.MAX_ITERATIONS//10) == 0:
                     print(iteration,*self.sess.run((self.loss,self.loss1,self.loss2,self.extra_loss)))
+                    print(*self.sess.run((self.debug_extra_loss)))
+                    print(-np.log(self.de[TARGET_CLASS].predict(nimg)))
 
                 # check if we should abort search if we're getting nowhere.
                 if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
@@ -235,14 +240,14 @@ class CarliniL2New:
                 # adjust the best result found so far
                 for e,(l2,sc,ii) in enumerate(zip(l2s,scores,nimg)):
                     #print(extra.shape)
-                    if l2 < bestl2[e] and compare(sc, np.argmax(batchlab[e])) and extra[e] <= 0:
-                        bestl2[e] = l2
+                    if l2+extra[e] < bestl2[e] and compare(sc, np.argmax(batchlab[e])):# and extra[e] <= 0:
+                        bestl2[e] = l2+extra[e]
                         bestscore[e] = np.argmax(sc)
                     #print(l2,o_bestl2[e],np.argmax(sc),np.argmax(batchlab[e]),
                     #      extra[e])
-                    if l2 < o_bestl2[e] and compare(sc, np.argmax(batchlab[e])) and extra[e] <= 0:
+                    if l2+extra[e] < o_bestl2[e] and compare(sc, np.argmax(batchlab[e])):# and extra[e] <= 0:
                         #print('set')
-                        o_bestl2[e] = l2
+                        o_bestl2[e] = l2+extra[e]
                         o_bestscore[e] = np.argmax(sc)
                         o_bestattack[e] = ii
 
@@ -303,11 +308,12 @@ class DensityEstimate:
         #centers = hidden.predict(centers).reshape((centers.shape[0],1,-1))
         self.centers_shape0 = centers.shape[0]
         centers = hidden.predict(centers)
+        centers = np.array([[np.mean(centers[i][..., j]) for j in range(centers[i].shape[-1])] for i in range(centers.shape[0])])
         #print("Center shape (interm): ")
         #print(centers.shape)
         #centers = centers.reshape((5444, 1, -1))
         #print("Center shape (after): ")
-        #print(centers.shape)
+        print(centers.shape)
         self.centers = centers
 
         self.sigma = sigma
@@ -316,8 +322,10 @@ class DensityEstimate:
 
         self.X = tf.placeholder(tf.float32, (None, image_size, image_size, num_channels))
 
-        hidden_res = hidden(self.X)[tf.newaxis,:,:]
-        #hidden_res = hidden(self.X)
+        #hidden_res = hidden(self.X)[tf.newaxis,:,:]
+        hidden_res = hidden(self.X)
+        hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
+        hidden_res = hidden_res[tf.newaxis,:]
         
         self.dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - hidden_res),(self.centers_shape0,1,-1)),axis=2)
 
@@ -325,8 +333,13 @@ class DensityEstimate:
         self.hidden = hidden
 
     def make(self, X):
-        dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - self.hidden(X)[tf.newaxis,:,:]),(self.centers_shape0,1,-1)),axis=2)
+        #dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - self.hidden(X)[tf.newaxis,:,:]),(self.centers_shape0,1,-1)),axis=2)
         #dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - self.hidden(X)),(self.centers_shape0,1,-1)),axis=2)
+        hidden_res = self.hidden(X)
+        hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
+        hidden_res = hidden_res[tf.newaxis,:]
+        dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - hidden_res),(self.centers_shape0,1,-1)),axis=2)
+
         return tf.reduce_mean(tf.exp(-dist/self.sigma),axis=0)
 
     def predict(self, xs):
@@ -346,7 +359,12 @@ def estimate_density_full(model, de, data):
 
 def extra_loss(de, target_lab):
     def fn(img, out):
-        return tf.nn.relu(-tf.log(de[target_lab].make(img))-DECONST)
+        return tf.nn.relu(-tf.log(de[target_lab].make(img))-DECONST)*1000
+    return fn
+
+def debug_extra_loss(de, target_lab):
+    def fn(img):
+        return -tf.log(de[target_lab].make(img))
     return fn
 
 def compute_optimal_sigma(sess, model, hidden_layer, data):
@@ -397,8 +415,9 @@ def run_kde(Data, Model, path):
     #compute_optimal_sigma(sess, model, hidden_layer, data)
     #MNIST SIGMA: 20
     
-    de = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i], model.image_size, model.num_channels, sigma=20) for i in range(10)]
-    de2 = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i][:100], model.image_size, model.num_channels, sigma=20) for i in range(10)]
+    de = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i], model.image_size, model.num_channels, sigma=0.864) for i in range(10)]
+    #de2 = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i], model.image_size, model.num_channels, sigma=0.864) for i in range(10)]
+    de2 = de
 
     p = tf.placeholder(tf.float32, (None, model.image_size, model.image_size, model.num_channels))
 
@@ -431,10 +450,14 @@ def run_kde(Data, Model, path):
     
     #start_density = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
     start_density = estimate_density_full(model, de, adv_candid)+1e-30
-    print("starting density", np.log(start_density))
+    print("starting density", -np.log(start_density))
 
     DECONST = -np.log(start_density)
     DECONST = np.median(DECONST)
+    #DECONST = 0
+
+    print("DECONST", DECONST)
+    #DECONST = -1 
 
     l = np.zeros((N,10))
     #l[np.arange(N),np.random.random_integers(0,9,N)] = 1
@@ -449,9 +472,9 @@ def run_kde(Data, Model, path):
     attack1 = CarliniL2(sess, model, batch_size=1, max_iterations=3000,
                        binary_search_steps=3, initial_const=1.0, learning_rate=1e-1,
                        targeted=True)
-    attack2 = CarliniL2New(sess, model, batch_size=1, max_iterations=10000,
+    attack2 = CarliniL2New(sess, model, batch_size=1, max_iterations=60000,
                            binary_search_steps=5, initial_const=1.0, learning_rate=1e-2,
-                           targeted=True, extra_loss=extra_loss(de2, np.argmax(l)))
+                           targeted=True, extra_loss=extra_loss(de2, TARGET_CLASS), debug_extra_loss=debug_extra_loss(de2, TARGET_CLASS), de=de2)
     #l = data.test_labels[:N]
     #l = np.zeros((N,10))
     #l[np.arange(N),1] = 1
@@ -487,8 +510,8 @@ def run_kde(Data, Model, path):
 
     show(adv)
 
-    print('de of test', np.mean(np.log(a)))
-    print('de of adv', np.mean(np.log(b)))
+    print('de of test', np.mean(-np.log(a)))
+    print('de of adv', np.mean(-np.log(b)))
 
     print('better ratio', np.mean(np.array(a)>np.array(b)))
     exit(0)
