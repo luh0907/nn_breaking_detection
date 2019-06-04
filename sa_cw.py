@@ -25,7 +25,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy.stats import gaussian_kde
+#from scipy.stats import gaussian_kde
+import scipy
 
 BINARY_SEARCH_STEPS = 9  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
@@ -300,8 +301,19 @@ def pop_layer(model, layer_name):
 
     return temp_model
 
+# EHLEE
+def get_removed_cols(hidden, centers):
+    removed_cols = []
+    centers = hidden.predict(centers)
+    centers = np.array([[np.mean(centers[i][..., j]) for j in range(centers[i].shape[-1])] for i in range(centers.shape[0])])
+    col_vectors = np.transpose(centers)
+    for i in range(col_vectors.shape[0]):
+        if(np.var(col_vectors[i]) < 1e-5 and i not in removed_cols):
+            removed_cols.append(i)
+    return removed_cols
+
 class DensityEstimate:
-    def __init__(self, sess, hidden, centers, image_size, num_channels, sigma=20):
+    def __init__(self, sess, hidden, centers, image_size, num_channels, removed_cols, sigma=20):
         self.sess = sess
         #print("Center shape (before): ")
         #print(centers.shape)
@@ -313,39 +325,61 @@ class DensityEstimate:
         #print(centers.shape)
         #centers = centers.reshape((5444, 1, -1))
         #print("Center shape (after): ")
+        centers = np.transpose(centers)
+        centers = np.delete(centers, removed_cols, axis=0)
+        centers = np.transpose(centers)
         print(centers.shape)
+
+        self.removed_cols = removed_cols
         self.centers = centers
-
         self.sigma = sigma
+        self.gaussian_means = tf.cast(tf.constant(centers), tf.float64)
 
-        self.gaussian_means = tf.constant(centers)
+        # Perform Cholesky Whitening
+        weights = np.ones(centers.shape[0])/centers.shape[0]
+        cov = np.cov(np.transpose(centers), rowvar=1, bias=False, aweights=weights)
+        inv_cov = scipy.linalg.inv(cov)
+        cov *= sigma**2
+        inv_cov /= sigma**2
+        self.whitening = tf.constant(scipy.linalg.cholesky(inv_cov))
+        self.scaled_centers = tf.matmul(self.whitening, tf.transpose(self.gaussian_means))
 
         self.X = tf.placeholder(tf.float32, (None, image_size, image_size, num_channels))
 
-        #hidden_res = hidden(self.X)[tf.newaxis,:,:]
-        hidden_res = hidden(self.X)
-        hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
-        hidden_res = hidden_res[tf.newaxis,:]
-        
-        self.dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - hidden_res),(self.centers_shape0,1,-1)),axis=2)
-
-        self.Y = tf.reduce_mean(tf.exp(-self.dist/self.sigma),axis=0)
         self.hidden = hidden
+
+    def get_kde(self, X):
+        #hidden_res = hidden(self.X)[tf.newaxis,:,:]
+        hidden_res = self.hidden(X)
+        hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
+        hidden_res = tf.cast(hidden_res[tf.newaxis,:], tf.float64)
+
+        hidden_res = tf.transpose(hidden_res)
+        remained_cols = [item for item in range(hidden_res.shape[0]) if not item in self.removed_cols]
+        hidden_res = tf.gather(hidden_res, remained_cols)
+
+        self.scaled_res = tf.matmul(self.whitening, hidden_res)
+        
+        self.dist = tf.reduce_sum(tf.reshape(tf.square(tf.transpose(self.scaled_centers - self.scaled_res)),(self.centers_shape0,1,-1)),axis=2)
+
+        return tf.reduce_mean(tf.exp(-self.dist), axis=0)
 
     def make(self, X):
         #dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - self.hidden(X)[tf.newaxis,:,:]),(self.centers_shape0,1,-1)),axis=2)
         #dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - self.hidden(X)),(self.centers_shape0,1,-1)),axis=2)
-        hidden_res = self.hidden(X)
-        hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
-        hidden_res = hidden_res[tf.newaxis,:]
-        dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - hidden_res),(self.centers_shape0,1,-1)),axis=2)
+        
+        #hidden_res = self.hidden(X)
+        #hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
+        #hidden_res = hidden_res[tf.newaxis,:]
+        #dist = tf.reduce_sum(tf.reshape(tf.square(self.gaussian_means - hidden_res),(self.centers_shape0,1,-1)),axis=2)
 
-        return tf.reduce_mean(tf.exp(-dist/self.sigma),axis=0)
+        #return tf.reduce_mean(tf.exp(-dist/self.sigma),axis=0)
+        return self.get_kde(X)
 
     def predict(self, xs):
         #print(xs.shape)
         #print(self.gaussian_means.shape)
-        return self.sess.run(self.Y, {self.X: xs})
+        return self.sess.run(self.get_kde(self.X), {self.X: xs})
 
 def estimate_density_full(model, de, data):
     labels = model.model.predict(data)
@@ -359,7 +393,7 @@ def estimate_density_full(model, de, data):
 
 def extra_loss(de, target_lab):
     def fn(img, out):
-        return tf.nn.relu(-tf.log(de[target_lab].make(img))-DECONST)*1000
+        return tf.cast(tf.nn.relu(-tf.log(de[target_lab].make(img))-DECONST)*1000, tf.float32)
     return fn
 
 def debug_extra_loss(de, target_lab):
@@ -415,7 +449,12 @@ def run_kde(Data, Model, path):
     #compute_optimal_sigma(sess, model, hidden_layer, data)
     #MNIST SIGMA: 20
     
-    de = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i], model.image_size, model.num_channels, sigma=0.864) for i in range(10)]
+    removed_cols = []
+    for i in range(10):
+        removed_cols.extend(get_removed_cols(hidden_layer, data.train_data[np.argmax(data.train_labels, axis=1)==i]))
+    removed_cols = list(set(removed_cols))
+
+    de = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i], model.image_size, model.num_channels, removed_cols, sigma=0.864) for i in range(10)]
     #de2 = [DensityEstimate(sess, hidden_layer, data.train_data[np.argmax(data.train_labels,axis=1)==i], model.image_size, model.num_channels, sigma=0.864) for i in range(10)]
     de2 = de
 

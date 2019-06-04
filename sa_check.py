@@ -6,8 +6,10 @@ from multiprocessing import Pool
 from tqdm import tqdm
 from keras.models import load_model, Model
 from keras import backend as K
-from scipy.stats import gaussian_kde
+#from scipy.stats import gaussian_kde
+from kde import gaussian_kde
 
+import scipy
 from utils_sa import *
 import tensorflow as tf
 
@@ -231,18 +233,59 @@ def fetch_dsa(model, x_train, x_target, target_name, layer_names, args):
 
     return dsa
 
+# from https://stackoverflow.com/questions/47709854/how-to-get-covariance-matrix-in-tensorflow?rq=1
+def tf_cov(x):
+    mean_x = tf.reduce_mean(x, axis=0, keep_dims=True)
+    mx = tf.matmul(tf.transpose(mean_x), mean_x)
+    vx = tf.matmul(tf.transpose(x), x)/tf.cast(tf.shape(x)[0], tf.float32)
+    cov_xx = vx - mx
+    return cov_xx
+
 class DensityEstimate:
     def __init__(self, sess, refined_ats, image_size=28, num_channels=1, sigma=20):
         self.sess = sess
         self.num_images = refined_ats.shape[0]
-        self.refined_ats = tf.constant(refined_ats)
+
+        self.refined_ats = tf.cast(tf.constant(refined_ats), tf.float64)
+
+        #self.refined_ats = tf.transpose(self.refined_ats)   # T
+
+        weights = np.ones(self.num_images)/self.num_images
+        ats_cov = np.cov(np.transpose(refined_ats), rowvar=1, bias=False, aweights=weights)
+        #print(ats_cov)
+        #inv_cov = scipy.linalg.inv(ats_cov)
+        inv_cov = np.linalg.pinv(ats_cov)
+        ats_cov *= sigma**2
+        inv_cov /= sigma**2
+        norm_factor = np.sqrt(scipy.linalg.det(2*np.pi*ats_cov))
+        #print(norm_factor)
+
+        #print(inv_cov)
+        #print(scipy.linalg.cholesky(inv_cov))
+        #print(np.linalg.cholesky(inv_cov))
+        whitening = tf.cast(tf.constant(scipy.linalg.cholesky(inv_cov)), tf.float64)
+
+        #ats_cov = tf_cov(self.refined_ats)
+        #self.ats_cov = ats_cov
+        #norm_factor = tf.sqrt(tf.matrix_determinant(1e2*ats_cov))
+        #self.norm_factor = norm_factor
+
+        #inv_cov = tf.matrix_inverse(ats_cov)
+        #whitening = tf.cholesky(inv_cov)
+        self.scaled_refined_ats = tf.matmul(whitening, tf.transpose(self.refined_ats))
+        #print(whitening.shape, self.refined_ats.shape, self.scaled_refined_ats.shape)
         self.sigma = sigma
-        self.X = tf.placeholder(tf.float32, (refined_ats.shape[1]))
-        self.dist = tf.reduce_sum(tf.reshape(tf.square(self.refined_ats - self.X), (self.num_images, 1, -1)), axis=2)
-        self.Y = tf.reduce_mean(tf.exp(-self.dist/self.sigma), axis=0)
+        self.X = tf.placeholder(tf.float64, (refined_ats.shape[1]))
+        #self.X = tf.transpose(self.X[tf.newaxis,:]) # T
+        scaled_X = tf.matmul(whitening, tf.transpose(self.X[tf.newaxis,:]))
+        self.scaled_X = scaled_X
+        #self.dist = tf.reduce_sum(tf.reshape(tf.square(self.refined_ats - self.X), (self.num_images, 1, -1)), axis=2)
+        self.dist = tf.reduce_sum(tf.square(tf.transpose(self.scaled_refined_ats - scaled_X)), axis=1)
+        self.Y = tf.reduce_mean(tf.exp(-self.dist), axis=0)
 
     def predict(self, xs):
-        return self.sess.run(self.Y, {self.X: xs})
+        res = self.sess.run(self.Y, {self.X: xs})
+        return res
 
 
 def _get_kdes(train_ats, train_pred, class_matrix, args):
@@ -311,6 +354,7 @@ def _get_lsa(kde, at, removed_cols):
     #print(-kde.logpdf(np.transpose(refined_at)))
     #print(kde.pdf(np.transpose(refined_at)))
     #return np.asscalar(-kde.logpdf(np.transpose(refined_at)))
+    #return np.asscalar(-np.log(kde.pdf(np.transpose(refined_at))))
     return np.asscalar(-np.log(kde.predict(refined_at)))
 
 

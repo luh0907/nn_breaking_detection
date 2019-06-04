@@ -105,7 +105,7 @@ if __name__ == "__main__":
         
         x_target = []
         for i in range(10):
-            x_target.extend(np.load("./adv/adv_mnist_cnw_target_{}.npy".format(i)))
+            x_target.extend(np.load("./adv_backup2/adv_mnist_cnw_target_{}.npy".format(i)))
         #x_target.extend(np.load("./adv/adv_mnist_cnw_target_9.npy"))
         x_target = np.array(x_target)
         print(x_target.shape)
@@ -124,7 +124,7 @@ if __name__ == "__main__":
         # ]
         layer_names = ["activation_6"]
 
-        x_target = np.load("./adv/adv_cifar_{}.npy".format(args.target))
+        x_target = np.load("./adv_backup2/adv_cifar_{}.npy".format(args.target))
 
     #x_train = x_train.astype("float32")
     #x_train = (x_train / 255.0) - (1.0 - CLIP_MAX)
