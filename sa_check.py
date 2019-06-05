@@ -326,8 +326,8 @@ def _get_kdes(train_ats, train_pred, class_matrix, args):
                     warn("ats were removed by threshold {}".format(args.var_threshold))
                 )
                 break
-            #kdes[label] = gaussian_kde(refined_ats)
-            kdes[label] = DensityEstimate(sess, np.transpose(refined_ats), sigma=0.864)
+            kdes[label] = gaussian_kde(refined_ats)
+            #kdes[label] = DensityEstimate(sess, np.transpose(refined_ats), sigma=0.864)
             print(refined_ats.shape)
             #print(kdes[label].factor)
 
@@ -353,9 +353,9 @@ def _get_lsa(kde, at, removed_cols):
     #print(refined_at)
     #print(-kde.logpdf(np.transpose(refined_at)))
     #print(kde.pdf(np.transpose(refined_at)))
-    #return np.asscalar(-kde.logpdf(np.transpose(refined_at)))
+    return np.asscalar(-kde.logpdf(np.transpose(refined_at)))
     #return np.asscalar(-np.log(kde.pdf(np.transpose(refined_at))))
-    return np.asscalar(-np.log(kde.predict(refined_at)))
+    #return np.asscalar(-np.log(kde.predict(refined_at)))
 
 
 def fetch_lsa(model, x_train, x_target, target_name, layer_names, args):

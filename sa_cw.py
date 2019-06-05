@@ -221,6 +221,7 @@ class CarliniL2New:
             print('set new const',CONST)
             prev = 1e20
             for iteration in range(self.MAX_ITERATIONS):
+            #for iteration in range(1):
                 # perform the attack 
                 _, l, l2s, scores, nimg, extra = self.sess.run([self.train, self.loss, 
                                                          self.l2dist, self.output, 
@@ -228,9 +229,13 @@ class CarliniL2New:
                 #print(np.argmax(scores))
                 # print out the losses every 10%
                 if iteration%(self.MAX_ITERATIONS//10) == 0:
-                    print(iteration,*self.sess.run((self.loss,self.loss1,self.loss2,self.extra_loss)))
-                    print(*self.sess.run((self.debug_extra_loss)))
-                    print(-np.log(self.de[TARGET_CLASS].predict(nimg)))
+                    print(iteration, l, np.argmax(scores), l2s, extra)
+                    #print(iteration,*self.sess.run((self.loss,self.loss1,self.loss2,self.extra_loss)))
+                    #print(*self.sess.run((self.debug_extra_loss)))
+                    #print(-np.log(self.de[TARGET_CLASS].predict(nimg)))
+                    de_of_nimg = self.de[TARGET_CLASS].predict(nimg)
+                    print(de_of_nimg)
+                    #print(l2s, *self.sess.run((self.l2dist, tf.reduce_sum(self.l2dist))))
 
                 # check if we should abort search if we're getting nowhere.
                 if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
@@ -241,14 +246,14 @@ class CarliniL2New:
                 # adjust the best result found so far
                 for e,(l2,sc,ii) in enumerate(zip(l2s,scores,nimg)):
                     #print(extra.shape)
-                    if l2+extra[e] < bestl2[e] and compare(sc, np.argmax(batchlab[e])):# and extra[e] <= 0:
-                        bestl2[e] = l2+extra[e]
+                    if l2 < bestl2[e] and compare(sc, np.argmax(batchlab[e])) and extra[e] <= 0:
+                        bestl2[e] = l2
                         bestscore[e] = np.argmax(sc)
                     #print(l2,o_bestl2[e],np.argmax(sc),np.argmax(batchlab[e]),
                     #      extra[e])
-                    if l2+extra[e] < o_bestl2[e] and compare(sc, np.argmax(batchlab[e])):# and extra[e] <= 0:
+                    if l2 < o_bestl2[e] and compare(sc, np.argmax(batchlab[e])) and extra[e] <= 0:
                         #print('set')
-                        o_bestl2[e] = l2+extra[e]
+                        o_bestl2[e] = l2
                         o_bestscore[e] = np.argmax(sc)
                         o_bestattack[e] = ii
 
@@ -350,7 +355,7 @@ class DensityEstimate:
 
     def get_kde(self, X):
         #hidden_res = hidden(self.X)[tf.newaxis,:,:]
-        hidden_res = self.hidden(X)
+        hidden_res = self.hidden(tf.cast(X, tf.float32))
         hidden_res = tf.stack([tf.reduce_mean(hidden_res[..., j]) for j in range(hidden_res.shape[-1])])
         hidden_res = tf.cast(hidden_res[tf.newaxis,:], tf.float64)
 
@@ -379,7 +384,9 @@ class DensityEstimate:
     def predict(self, xs):
         #print(xs.shape)
         #print(self.gaussian_means.shape)
-        return self.sess.run(self.get_kde(self.X), {self.X: xs})
+        res = self.sess.run(self.get_kde(self.X), {self.X: xs})
+        #print(self.sess.run(self.dist, {self.X: xs}))
+        return res
 
 def estimate_density_full(model, de, data):
     labels = model.model.predict(data)
@@ -394,6 +401,7 @@ def estimate_density_full(model, de, data):
 def extra_loss(de, target_lab):
     def fn(img, out):
         return tf.cast(tf.nn.relu(-tf.log(de[target_lab].make(img))-DECONST)*1000, tf.float32)
+        #return tf.cast(tf.nn.relu(-de[target_lab].make(img)-DECONST)*1000, tf.float32)
     return fn
 
 def debug_extra_loss(de, target_lab):
@@ -490,8 +498,10 @@ def run_kde(Data, Model, path):
     #start_density = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
     start_density = estimate_density_full(model, de, adv_candid)+1e-30
     print("starting density", -np.log(start_density))
+    #print("starting density", -start_density)
 
     DECONST = -np.log(start_density)
+    #DECONST = -start_density
     DECONST = np.median(DECONST)
     #DECONST = 0
 
