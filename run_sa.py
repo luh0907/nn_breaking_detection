@@ -15,6 +15,10 @@ from setup_mnist import MNIST, MNISTModel
 CLIP_MIN = -0.5
 CLIP_MAX = 0.5
 
+SELECTED_LAYER_N = 1 
+SELECTED_LAYER = "activation_"+str(SELECTED_LAYER_N)
+SELECTED_LAYER_ADV = "activation_"+str(SELECTED_LAYER_N+4)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--d", "-d", help="Dataset", type=str, default="mnist")
@@ -92,7 +96,7 @@ if __name__ == "__main__":
         # You can select some layers you want to test.
         # layer_names = ["activation_1"]
         # layer_names = ["activation_2"]
-        layer_names = ["activation_3"]
+        layer_names = [SELECTED_LAYER]
 
         # Load target set.
         #x_target = np.load("./adv/adv_mnist_{}.npy".format(args.target))
@@ -105,8 +109,8 @@ if __name__ == "__main__":
         
         x_target = []
         for i in range(10):
-            x_target.extend(np.load("./adv/adv_mnist_cnw_target_{}.npy".format(i)))
-        #x_target.extend(np.load("./adv/adv_mnist_cnw_target_9.npy"))
+            x_target.extend(np.load("./adv/{}/adv_mnist_cnw_target_{}.npy".format(SELECTED_LAYER_ADV, i)))
+        #x_target.extend(np.load("./adv/{}/adv_mnist_cnw_target_0.npy".format(SELECTED_LAYER_ADV)))
         x_target = np.array(x_target)
         print(x_target.shape)
 

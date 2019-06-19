@@ -407,7 +407,7 @@ def run_kde(Data, Model, path):
     model2 = Model(path)
 
     # TODO: hidden_layer -> selected layer
-    layer_name = "activation_7"
+    layer_name = SELECTED_LAYER
     hidden_layer = pop_layer(model2.model, layer_name)
     #hidden_layer = pop(model2.model) # once to remove dense(10)
     #hidden_layer = pop(hidden_layer) # once to remove ReLU
@@ -489,17 +489,29 @@ def run_kde(Data, Model, path):
     adv = attack2.attack(adv_candid, adv, l)
 
     #np.save("/tmp/q"+str(M),adv)
-    np.save("./adv/adv_mnist_cnw_target_{}".format(TARGET_CLASS), adv)
+    np.save("./adv/{}/adv_mnist_cnw_target_{}".format(SELECTED_LAYER, TARGET_CLASS), adv)
     #adv = np.load("/tmp/qq.npy")
 
     #print('labels',np.mean(np.argmax(sess.run(model.predict(p), {p: adv}),axis=1)==l))
     print('labels')
-    print(np.argmax(l, axis=1))
-    print(np.argmax(sess.run(model.predict(p), {p: adv}), axis=1))
-    print(np.argmax(model.model.predict(adv), axis=1))
+    p_target_labels = str(np.argmax(l, axis=1))
+    p_prediction = str(np.argmax(model.model.predict(adv), axis=1))
 
+    print(p_target_labels)
+    print(np.argmax(sess.run(model.predict(p), {p: adv}), axis=1))
+    print(p_prediction)
+
+    f = open("./adv/{}/targeted_{}.txt".format(SELECTED_LAYER, TARGET_CLASS), "w")
+    f.write(p_target_labels)
+    f.write(p_prediction)
+    f.close()
+
+    mean_distortion = np.mean(np.sum((adv-adv_candid)**2, axis=(1,2,3))**.5)
     #print('mean distortion',np.mean(np.sum((adv-data.test_data[M:M+N])**2,axis=(1,2,3))**.5))
-    print('mean distortion', np.mean(np.sum((adv-adv_candid)**2, axis=(1,2,3))**.5))
+    print('mean distortion', mean_distortion)
+    f = open("./adv/{}/mean_distortion_{}.txt".format(SELECTED_LAYER, TARGET_CLASS), "w")
+    f.write(str(mean_distortion))
+    f.close()
     
     #a = estimate_density_full(model, de, data.test_data[M:M+N])+1e-30
     a = estimate_density_full(model, de, adv_candid)+1e-30
@@ -512,6 +524,11 @@ def run_kde(Data, Model, path):
 
     print('de of test', np.mean(-np.log(a)))
     print('de of adv', np.mean(-np.log(b)))
+
+    f = open("./adv/{}/de_{}.txt".format(SELECTED_LAYER, TARGET_CLASS), "w")
+    f.write(str(np.mean(-np.log(a))))
+    f.write(str(np.mean(-np.log(b))))
+    f.close()
 
     print('better ratio', np.mean(np.array(a)>np.array(b)))
     exit(0)
@@ -550,9 +567,9 @@ def show(img):
             jumped = True
             continue
         if jumped:
-            imageio.imwrite("./adv/adv_result_{}_to_{}.png".format(i,TARGET_CLASS), img[i-1].reshape(28,28))
+            imageio.imwrite("./adv/{}/adv_result_{}_to_{}.png".format(SELECTED_LAYER, i,TARGET_CLASS), img[i-1].reshape(28,28))
         else:
-            imageio.imwrite("./adv/adv_result_{}_to_{}.png".format(i,TARGET_CLASS), img[i].reshape(28,28))
+            imageio.imwrite("./adv/{}/adv_result_{}_to_{}.png".format(SELECTED_LAYER, i,TARGET_CLASS), img[i].reshape(28,28))
 
     remap = "  .*#"+"#"*100
     img = (img.flatten()+.5)*3
@@ -564,5 +581,8 @@ def show(img):
 
 #M = int(sys.argv[1])
 M = 18
+SELECTED_LAYER = "activation_" + sys.argv[1]
+TARGET_CLASS = int(sys.argv[2])
+
 run_kde(MNIST, MNISTModel, "models/mnist")
 #run_kde(CIFAR, CIFARModel, "models/cifar")
